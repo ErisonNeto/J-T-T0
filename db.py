@@ -1,34 +1,36 @@
 import os
-from contextlib import contextmanager
+from functools import lru_cache
 
-import psycopg
-from psycopg.rows import dict_row
 from dotenv import load_dotenv
+from supabase import Client, create_client
 
 load_dotenv()
 
 
-def get_database_url() -> str:
-    url = os.getenv("DATABASE_URL", "").strip()
+def get_supabase_url() -> str:
+    url = os.getenv("SUPABASE_URL", "").strip()
     if not url:
-        raise RuntimeError(
-            "Defina DATABASE_URL no arquivo .env. Exemplo: "
-            "postgresql://postgres:SUA_SENHA@localhost:5432/jt_t0"
-        )
+        raise RuntimeError("Defina SUPABASE_URL no ambiente.")
     return url
 
 
-@contextmanager
-def get_conn():
-    conn = psycopg.connect(get_database_url(), row_factory=dict_row)
-    try:
-        yield conn
-    finally:
-        conn.close()
+def get_supabase_key() -> str:
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not key:
+        raise RuntimeError("Defina SUPABASE_SERVICE_ROLE_KEY no ambiente.")
+    return key
+
+
+@lru_cache(maxsize=1)
+def get_supabase() -> Client:
+    return create_client(get_supabase_url(), get_supabase_key())
 
 
 def test_connection() -> dict:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select current_database() as banco, current_user as usuario, version() as versao")
-            return cur.fetchone()
+    client = get_supabase()
+    response = client.table("t0_diario").select("id", count="exact").limit(1).execute()
+    return {
+        "backend": "Supabase",
+        "tabela": "t0_diario",
+        "registros": response.count if response.count is not None else 0,
+    }
