@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>T0 - Regional | J&T Express</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero">
+      <div class="hero-tags">
+        <span class="pill pill-red">J&amp;T EXPRESS</span>
+        <span class="pill pill-gray">QUALIDADE • R/M ORLEAN</span>
+      </div>
+      <div class="hero-title-row">
+        <h1>T0 - Regional</h1>
+        <span class="hero-mark" aria-hidden="true"></span>
+      </div>
+      <p>Performance operacional das entregas realizadas no mesmo dia do recebimento</p>
+    </section>
+
+    <section class="panel filter-section">
+      <div class="section-heading filter-heading">
+        <div>
+          <span class="eyebrow">CONTROLE DE VISÃO</span>
+          <h2>Filtros operacionais</h2>
+          <p>Refine o período e a gestão responsável pela operação.</p>
+        </div>
+        <button id="limpar" type="button" class="btn-secondary">Limpar filtros</button>
+      </div>
+
+      <div class="filters-grid">
+        <div class="filter-card">
+          <label for="dataIni">DATA INICIAL</label>
+          <input id="dataIni" type="date">
+        </div>
+        <div class="filter-card">
+          <label for="dataFim">DATA FINAL</label>
+          <input id="dataFim" type="date">
+        </div>
+        <div class="filter-card filter-wide">
+          <label for="sc">COORDENADOR / SUPERVISOR</label>
+          <select id="sc"><option value="">Todos</option></select>
+        </div>
+        <div class="filter-card">
+          <label for="rm">R/M</label>
+          <select id="rm"><option value="">Todos</option></select>
+        </div>
+        <div class="filter-card action-card">
+          <label>ATUALIZAR VISÃO</label>
+          <button id="aplicar" type="button" class="btn-primary">Aplicar filtros</button>
+        </div>
+      </div>
+
+      <details class="advanced-filters">
+        <summary>Filtros adicionais</summary>
+        <div class="advanced-grid">
+          <div class="filter-card compact">
+            <label for="uf">UF</label>
+            <select id="uf"><option value="">Todos</option></select>
+          </div>
+          <div class="filter-card compact">
+            <label for="base">BASE</label>
+            <select id="base"><option value="">Todas</option></select>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="kpi-grid">
+      <article class="kpi-card accent-red">
+        <div class="kpi-topline">
+          <span>T0 GERAL</span>
+          <span class="goal-badge">META {{ meta }}%</span>
+        </div>
+        <strong id="taxa" class="kpi-number">—</strong>
+        <p>Performance consolidada no filtro atual</p>
+      </article>
+
+      <article class="kpi-card accent-slate">
+        <div class="kpi-topline">
+          <span>TOTAL DE PEDIDOS</span>
+          <span class="kpi-icon slate">Σ</span>
+        </div>
+        <strong id="total" class="kpi-number dark">—</strong>
+        <p>Remessas válidas analisadas</p>
+      </article>
+
+      <article class="kpi-card accent-green">
+        <div class="kpi-topline">
+          <span>T0 OK</span>
+          <span class="kpi-icon green">✓</span>
+        </div>
+        <strong id="ok" class="kpi-number green-text">—</strong>
+        <p>Entregas realizadas no mesmo dia</p>
+      </article>
+
+      <article class="kpi-card accent-red-soft">
+        <div class="kpi-topline">
+          <span>T0 PERDIDO</span>
+          <span class="kpi-icon red">!</span>
+        </div>
+        <strong id="perdido" class="kpi-number red-text">—</strong>
+        <p>Pedidos não entregues dentro do T0</p>
+      </article>
+    </section>
+
+    <section class="panel trend-panel">
+      <div class="section-heading chart-heading">
+        <div>
+          <span class="eyebrow">TENDÊNCIA</span>
+          <h2>Evolução diária do T0</h2>
+          <p>Desempenho diário conforme os filtros aplicados</p>
+        </div>
+        <span class="legend-pill"><i></i> Meta diária {{ meta }}%</span>
+      </div>
+      <div class="trend-chart-box"><canvas id="evolucao"></canvas></div>
+    </section>
+
+    <section class="analysis-grid">
+      <article class="panel analysis-panel">
+        <div class="section-heading small-heading">
+          <div>
+            <span class="eyebrow">GESTÃO</span>
+            <h2>Performance por S/C</h2>
+            <p>Coordenadores e supervisores ordenados pelo menor T0</p>
+          </div>
+        </div>
+        <div class="sc-chart-box"><canvas id="scChart"></canvas></div>
+      </article>
+
+      <article class="panel insight-panel">
+        <div class="section-heading small-heading">
+          <div>
+            <span class="eyebrow">LEITURA EXECUTIVA</span>
+            <h2>Status do indicador</h2>
+            <p>Resumo da performance frente à meta geral</p>
+          </div>
+        </div>
+        <div class="insight-body">
+          <div class="insight-status-row">
+            <span id="status" class="status-badge neutral">—</span>
+            <strong id="gap" class="gap-number">—</strong>
+          </div>
+          <p id="insightText" class="insight-copy">Selecione o período para avaliar o desempenho do T0.</p>
+          <div class="mini-meter"><span id="meterFill"></span><i class="meter-goal" style="left:70%"></i></div>
+          <div class="meter-scale"><span>0%</span><span>Meta 70%</span><span>100%</span></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel table-panel">
+      <div class="section-heading table-heading">
+        <div>
+          <span class="eyebrow">PRIORIDADE OPERACIONAL</span>
+          <h2>Piores bases</h2>
+          <p>Bases ordenadas pelo menor T0 dentro do filtro selecionado</p>
+        </div>
+        <span class="legend-pill"><i></i> Meta {{ meta }}%</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>BASE</th>
+              <th>PEDIDOS</th>
+              <th>T0 OK</th>
+              <th>T0 PERDIDO</th>
+              <th>T0</th>
+              <th>GAP P/ META</th>
+              <th>STATUS</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
