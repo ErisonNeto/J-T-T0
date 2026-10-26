@@ -7,50 +7,51 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from db import get_conn
+from db import get_supabase
 
 BASE_DIR = Path(__file__).resolve().parent
 META_T0 = 0.70
+PAGE_SIZE = 1000
 
 app = FastAPI(title="T0 - Regional | J&T Express")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
+def execute_all(query):
+    rows = []
+    start = 0
+    while True:
+        response = query.range(start, start + PAGE_SIZE - 1).execute()
+        batch = response.data or []
+        rows.extend(batch)
+        if len(batch) < PAGE_SIZE:
+            break
+        start += PAGE_SIZE
+    return rows
+
+
 def fetch_rows(data_ini=None, data_fim=None, rm=None, sc=None, uf=None, base=None):
-    clauses = []
-    params = []
+    client = get_supabase()
+    query = client.table("t0_diario").select("*")
 
     if data_ini:
-        clauses.append("data >= %s")
-        params.append(data_ini)
+        query = query.gte("data", data_ini)
     if data_fim:
-        clauses.append("data <= %s")
-        params.append(data_fim)
+        query = query.lte("data", data_fim)
     if rm:
-        clauses.append("rm = %s")
-        params.append(rm)
+        query = query.eq("rm", rm)
     if sc:
-        clauses.append("sc = %s")
-        params.append(sc)
+        query = query.eq("sc", sc)
     if uf:
-        clauses.append("uf = %s")
-        params.append(uf)
+        query = query.eq("uf", uf)
     if base:
-        clauses.append("base = %s")
-        params.append(base)
+        query = query.eq("base", base)
 
-    where = f" where {' and '.join(clauses)}" if clauses else ""
-    query = f"select * from public.t0_diario{where} order by data, base"
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            rows = cur.fetchall()
+    query = query.order("data").order("base")
+    rows = execute_all(query)
 
     for r in rows:
-        if r.get("data") is not None:
-            r["data"] = r["data"].isoformat()
         if r.get("taxa_t0") is not None:
             r["taxa_t0"] = float(r["taxa_t0"])
     return rows
@@ -62,6 +63,20 @@ def taxa(rows):
     return total, ok, (ok / total if total else 0)
 
 
+def latest_date():
+    client = get_supabase()
+    response = (
+        client.table("t0_diario")
+        .select("data")
+        .order("data", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if response.data:
+        return response.data[0].get("data")
+    return None
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "meta": int(META_T0 * 100)})
@@ -69,19 +84,15 @@ def home(request: Request):
 
 @app.get("/api/datas")
 def datas():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select distinct data from public.t0_diario order by data desc limit 365")
-            rows = cur.fetchall()
-    return [r["data"].isoformat() for r in rows if r.get("data")]
+    client = get_supabase()
+    rows = execute_all(client.table("t0_diario").select("data").order("data", desc=True))
+    return sorted({r["data"] for r in rows if r.get("data")}, reverse=True)[:365]
 
 
 @app.get("/api/filtros")
 def filtros():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select distinct rm, sc, uf, base from public.t0_diario")
-            rows = cur.fetchall()
+    client = get_supabase()
+    rows = execute_all(client.table("t0_diario").select("rm,sc,uf,base"))
     return {
         "rm": sorted({r["rm"] for r in rows if r.get("rm")}),
         "sc": sorted({r["sc"] for r in rows if r.get("sc") and r.get("sc") != "—"}),
@@ -100,11 +111,8 @@ def dashboard(
     base: Optional[str] = None,
 ):
     if not data_ini or not data_fim:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("select max(data) as data from public.t0_diario")
-                latest = cur.fetchone()
-        d = latest["data"].isoformat() if latest and latest.get("data") else (date.today() - timedelta(days=1)).isoformat()
+        latest = latest_date()
+        d = latest or (date.today() - timedelta(days=1)).isoformat()
         data_ini = data_ini or d
         data_fim = data_fim or d
 
@@ -119,7 +127,7 @@ def dashboard(
         out = []
         for k, rs in groups.items():
             t, o, p = taxa(rs)
-            out.append({"nome": k, "total": t, "ok": o, "perdido": t-o, "taxa": round(p*100, 2)})
+            out.append({"nome": k, "total": t, "ok": o, "perdido": t - o, "taxa": round(p * 100, 2)})
         return out
 
     evolucao = sorted(group("data"), key=lambda x: x["nome"])
