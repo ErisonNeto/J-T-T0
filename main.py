@@ -77,6 +77,25 @@ def latest_date():
     return None
 
 
+def has_data_for(target_date: str) -> bool:
+    client = get_supabase()
+    response = (
+        client.table("t0_diario")
+        .select("data")
+        .eq("data", target_date)
+        .limit(1)
+        .execute()
+    )
+    return bool(response.data)
+
+
+def default_dashboard_date() -> str:
+    d1 = (date.today() - timedelta(days=1)).isoformat()
+    if has_data_for(d1):
+        return d1
+    return latest_date() or d1
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "meta": int(META_T0 * 100)})
@@ -111,8 +130,7 @@ def dashboard(
     base: Optional[str] = None,
 ):
     if not data_ini or not data_fim:
-        latest = latest_date()
-        d = latest or (date.today() - timedelta(days=1)).isoformat()
+        d = default_dashboard_date()
         data_ini = data_ini or d
         data_fim = data_fim or d
 
