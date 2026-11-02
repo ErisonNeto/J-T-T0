@@ -7,49 +7,45 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from db import get_supabase
+from db import query_rows, test_connection
 
 BASE_DIR = Path(__file__).resolve().parent
 META_T0 = 0.70
-PAGE_SIZE = 1000
 
 app = FastAPI(title="T0 - Regional | J&T Express")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
-def execute_all(query):
-    rows = []
-    start = 0
-    while True:
-        response = query.range(start, start + PAGE_SIZE - 1).execute()
-        batch = response.data or []
-        rows.extend(batch)
-        if len(batch) < PAGE_SIZE:
-            break
-        start += PAGE_SIZE
-    return rows
-
-
 def fetch_rows(data_ini=None, data_fim=None, rm=None, sc=None, uf=None, base=None):
-    client = get_supabase()
-    query = client.table("t0_diario").select("*")
+    where = []
+    params = []
 
     if data_ini:
-        query = query.gte("data", data_ini)
+        where.append("data >= %s::date")
+        params.append(data_ini)
     if data_fim:
-        query = query.lte("data", data_fim)
+        where.append("data <= %s::date")
+        params.append(data_fim)
     if rm:
-        query = query.eq("rm", rm)
+        where.append("rm = %s")
+        params.append(rm)
     if sc:
-        query = query.eq("sc", sc)
+        where.append("sc = %s")
+        params.append(sc)
     if uf:
-        query = query.eq("uf", uf)
+        where.append("uf = %s")
+        params.append(uf)
     if base:
-        query = query.eq("base", base)
+        where.append("base = %s")
+        params.append(base)
 
-    query = query.order("data").order("base")
-    rows = execute_all(query)
+    sql = "SELECT * FROM t0_diario"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY data, base;"
+
+    rows = query_rows(sql, params)
 
     for r in rows:
         if r.get("taxa_t0") is not None:
@@ -64,29 +60,18 @@ def taxa(rows):
 
 
 def latest_date():
-    client = get_supabase()
-    response = (
-        client.table("t0_diario")
-        .select("data")
-        .order("data", desc=True)
-        .limit(1)
-        .execute()
-    )
-    if response.data:
-        return response.data[0].get("data")
+    rows = query_rows("SELECT MAX(data) AS data FROM t0_diario;")
+    if rows and rows[0].get("data"):
+        return str(rows[0]["data"])
     return None
 
 
 def has_data_for(target_date: str) -> bool:
-    client = get_supabase()
-    response = (
-        client.table("t0_diario")
-        .select("data")
-        .eq("data", target_date)
-        .limit(1)
-        .execute()
+    rows = query_rows(
+        "SELECT 1 AS ok FROM t0_diario WHERE data = %s::date LIMIT 1;",
+        [target_date],
     )
-    return bool(response.data)
+    return bool(rows)
 
 
 def default_dashboard_date() -> str:
@@ -98,23 +83,37 @@ def default_dashboard_date() -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "meta": int(META_T0 * 100)})
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"meta": int(META_T0 * 100)},
+    )
+
+
+@app.get("/api/health")
+def api_health():
+    info = test_connection()
+    return {"ok": True, **info}
 
 
 @app.get("/api/datas")
 def datas():
-    client = get_supabase()
-    rows = execute_all(client.table("t0_diario").select("data").order("data", desc=True))
-    return sorted({r["data"] for r in rows if r.get("data")}, reverse=True)[:365]
+    rows = query_rows(
+        "SELECT DISTINCT data FROM t0_diario ORDER BY data DESC LIMIT 365;"
+    )
+    return [str(r["data"]) for r in rows if r.get("data")]
 
 
 @app.get("/api/filtros")
 def filtros():
-    client = get_supabase()
-    rows = execute_all(client.table("t0_diario").select("rm,sc,uf,base"))
+    rows = query_rows("SELECT rm, sc, uf, base FROM t0_diario;")
     return {
         "rm": sorted({r["rm"] for r in rows if r.get("rm")}),
-        "sc": sorted({r["sc"] for r in rows if r.get("sc") and r.get("sc") != "—"}),
+        "sc": sorted({
+            r["sc"]
+            for r in rows
+            if r.get("sc") and r.get("sc") != "—"
+        }),
         "uf": sorted({r["uf"] for r in rows if r.get("uf")}),
         "base": sorted({r["base"] for r in rows if r.get("base")}),
     }
@@ -142,10 +141,17 @@ def dashboard(
         for r in rows:
             k = r.get(key) or "—"
             groups.setdefault(k, []).append(r)
+
         out = []
         for k, rs in groups.items():
             t, o, p = taxa(rs)
-            out.append({"nome": k, "total": t, "ok": o, "perdido": t - o, "taxa": round(p * 100, 2)})
+            out.append({
+                "nome": k,
+                "total": t,
+                "ok": o,
+                "perdido": t - o,
+                "taxa": round(p * 100, 2),
+            })
         return out
 
     evolucao = sorted(group("data"), key=lambda x: x["nome"])
