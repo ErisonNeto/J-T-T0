@@ -10,7 +10,8 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
-from db import get_supabase
+from db import JT_API_KEY, JT_API_URL
+import requests
 
 load_dotenv()
 
@@ -409,7 +410,7 @@ def build() -> tuple[pd.DataFrame, dict]:
     }
 
 
-def to_supabase_records(df: pd.DataFrame) -> list[dict]:
+def to_api_records(df: pd.DataFrame) -> list[dict]:
     cols = [
         "data",
         "codigo_base",
@@ -441,52 +442,51 @@ def to_supabase_records(df: pd.DataFrame) -> list[dict]:
 
 
 def upload(df: pd.DataFrame) -> None:
-    client = get_supabase()
-    records = to_supabase_records(df)
-
+    if not JT_API_KEY:
+        raise RuntimeError("JT_API_KEY ausente no arquivo .env")
+    records = to_api_records(df)
     if not records:
-        print("Nenhuma linha para enviar ao Supabase.")
+        print("Nenhuma linha T0 para enviar à JT API.")
         return
 
-    try:
-        client.table("t0_diario").select("id").limit(1).execute()
-    except Exception as exc:
-        raise RuntimeError(
-            "Não foi possível acessar public.t0_diario no Supabase. "
-            "Confirme se a tabela existe e se SUPABASE_URL / "
-            "SUPABASE_SERVICE_ROLE_KEY estão corretos."
-        ) from exc
+    url = f"{JT_API_URL.rstrip('/')}/import"
+    headers = {"X-API-Key": JT_API_KEY, "Content-Type": "application/json"}
+    session = requests.Session()
+    total = len(records)
 
-    for start in range(0, len(records), BATCH_SIZE):
-        batch = records[start : start + BATCH_SIZE]
+    for start in range(0, total, BATCH_SIZE):
+        batch = records[start:start + BATCH_SIZE]
+        payload = {
+            "tabela": "t0_diario",
+            "chave": ["data", "codigo_base"],
+            "registros": batch,
+            "criar_tabela": False,
+            "adicionar_colunas": False,
+        }
         try:
-            client.table("t0_diario").upsert(
-                batch,
-                on_conflict="data,codigo_base",
-            ).execute()
-        except Exception as exc:
-            fim = min(start + len(batch), len(records))
+            response = session.post(url, json=payload, headers=headers, timeout=(15, 120))
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            detail = ""
+            if getattr(exc, "response", None) is not None:
+                detail = f" HTTP {exc.response.status_code}: {exc.response.text[:1000]}"
             raise RuntimeError(
-                f"Falha ao enviar lote {start + 1}-{fim} ao Supabase."
+                f"Falha ao importar T0 pela JT API no lote {start+1}-{min(start+BATCH_SIZE,total)}.{detail}"
             ) from exc
-
-        print(
-            f"  Supabase: {min(start + len(batch), len(records)):,}/"
-            f"{len(records):,} linhas enviadas"
-        )
+        print(f"  JT API: {min(start+len(batch),total):,}/{total:,} linhas enviadas")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Importa automaticamente T0 padrão/lista + consolidado histórico "
-            "+ Gestão de colaboradores para o Supabase."
+            "+ Gestão de colaboradores para a JT API."
         )
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Processa e mostra o resumo sem gravar no Supabase.",
+        help="Processa e mostra o resumo sem gravar na JT API.",
     )
     args = parser.parse_args()
 
@@ -544,11 +544,11 @@ def main() -> None:
     )
 
     if args.dry_run:
-        print("DRY-RUN: nada gravado no Supabase.")
+        print("DRY-RUN: nada gravado na JT API.")
         return
 
     upload(df)
-    print("Importação concluída com sucesso no Supabase.")
+    print("Importação concluída com sucesso na JT API.")
 
 
 if __name__ == "__main__":
