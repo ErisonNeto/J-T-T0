@@ -10,10 +10,12 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
-from db import JT_API_KEY, JT_API_URL
 import requests
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
+JT_API_URL = os.getenv("JT_API_URL", "https://jt-api.rockettechbr.com.br").strip().rstrip("/")
+JT_API_KEY = os.getenv("JT_API_KEY", "").strip()
 
 META_T0 = 0.70
 RM_ALVO = "ORLEAN DA SILVA DO NASCIMENTO"
