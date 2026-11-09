@@ -8,9 +8,18 @@ const BAD = '#df171f';
 const GRID = '#e8ebef';
 const MUTED = '#718096';
 let availableDates = [];
+let loadSequence = 0;
+const todayLocal = () => new Date().toLocaleDateString('en-CA');
+function yesterdayLocal(){
+  const now = new Date();
+  now.setDate(now.getDate() - 1);
+  const year = now.getFullYear();
+  return `${year}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+function defaultDate(){ const d1 = yesterdayLocal(); return availableDates.includes(d1) ? d1 : (availableDates[0] || d1); }
 
 async function json(url){
-  const r = await fetch(url);
+  const r = await fetch(url, { cache: 'no-store' });
   if(!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -28,16 +37,17 @@ function fullDate(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return
 async function init(){
   const [datas, filtros] = await Promise.all([json('/api/datas'), json('/api/filtros')]);
   availableDates = datas;
-  if(datas.length){ $('dataIni').value = datas[0]; $('dataFim').value = datas[0]; }
+  $('dataIni').value = defaultDate(); $('dataFim').value = defaultDate();
   opt($('rm'), filtros.rm); opt($('sc'), filtros.sc); opt($('uf'), filtros.uf); opt($('base'), filtros.base);
   $('aplicar').onclick = load;
+  ['rm','sc','uf','base','dataIni','dataFim'].forEach(id => $(id).addEventListener('change', load));
   $('limpar').onclick = clearFilters;
   await load();
 }
 
 function clearFilters(){
   ['rm','sc','uf','base'].forEach(id => $(id).value = '');
-  if(availableDates.length){ $('dataIni').value = availableDates[0]; $('dataFim').value = availableDates[0]; }
+  $('dataIni').value = defaultDate(); $('dataFim').value = defaultDate();
   load();
 }
 
@@ -124,7 +134,25 @@ function buildTable(d){
 }
 
 async function load(){
-  const d=await json('/api/dashboard?'+params());
-  setKpis(d); buildEvolution(d); buildSC(d); buildTable(d);
+  const seq = ++loadSequence;
+  const applied = params();
+  const selectedSC = $('sc').value;
+  try {
+    // Cache busting impede que CDN/navegador reutilize dados de outro S/C.
+    const d = await json('/api/dashboard?' + applied + '&_=' + Date.now());
+    if (seq !== loadSequence) return; // uma resposta antiga nunca sobrescreve o novo filtro
+    if ((d.filtros_aplicados?.sc || '') !== selectedSC) {
+      throw new Error('O servidor não confirmou o filtro S/C solicitado. Atualize o Render.');
+    }
+    // Todos os blocos recebem exatamente o MESMO recorte devolvido pela API.
+    setKpis(d);
+    buildEvolution(d);
+    buildSC(d);
+    buildTable(d);
+  } catch(e) {
+    if (seq !== loadSequence) return;
+    console.error('Erro ao aplicar filtros no T0:', e);
+    alert('Não foi possível atualizar todos os indicadores. ' + e.message);
+  }
 }
 init().catch(e=>{console.error(e);alert('Erro ao carregar dashboard T0. Veja o console.');});
