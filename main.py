@@ -159,6 +159,14 @@ def dashboard(
     bases = sorted(group("base"), key=lambda x: (x["taxa"], -x["total"]))
 
     return {
+        "filtros_aplicados": {
+            "data_ini": data_ini,
+            "data_fim": data_fim,
+            "rm": rm or "",
+            "sc": sc or "",
+            "uf": uf or "",
+            "base": base or "",
+        },
         "meta": META_T0 * 100,
         "kpis": {
             "taxa": round(tx * 100, 2),
