@@ -120,7 +120,8 @@ def read_t0_padrao(path: str, sheet: str) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name=sheet, engine="openpyxl")
 
     c_remessa = pick_col(df, "Número da Remessa")
-    c_base = pick_col(df, "Nome da base")
+    # Relatorios Detalhes usam Nome da filial; Gestao fornece o nome oficial.
+    c_base = pick_col(df, "Nome da base", "Nome da filial", "Base")
     c_codigo = pick_col(df, "Código da base")
     c_receb = pick_col(df, "Horário bipagem de recebimento")
     c_entrega = pick_col(df, "Horário da entrega")
@@ -129,7 +130,6 @@ def read_t0_padrao(path: str, sheet: str) -> pd.DataFrame:
         nome
         for nome, col in [
             ("Número da Remessa", c_remessa),
-            ("Nome da base", c_base),
             ("Código da base", c_codigo),
             ("Horário bipagem de recebimento", c_receb),
             ("Horário da entrega", c_entrega),
@@ -142,10 +142,11 @@ def read_t0_padrao(path: str, sheet: str) -> pd.DataFrame:
     out = pd.DataFrame(
         {
             "numero_remessa": df[c_remessa].fillna("").astype(str).str.strip(),
-            "base": df[c_base].fillna("").astype(str).str.strip(),
+            "base": (df[c_base].fillna("").astype(str).str.strip()
+                     if c_base is not None else pd.Series("", index=df.index, dtype="object")),
             "codigo_base": df[c_codigo].map(norm_code),
-            "recebimento": pd.to_datetime(df[c_receb], errors="coerce"),
-            "entrega": pd.to_datetime(df[c_entrega], errors="coerce"),
+            "recebimento": excel_date_to_datetime(df[c_receb]),
+            "entrega": excel_date_to_datetime(df[c_entrega]),
         }
     )
 
@@ -162,11 +163,23 @@ def read_t0_padrao(path: str, sheet: str) -> pd.DataFrame:
 
 
 def excel_date_to_datetime(series: pd.Series) -> pd.Series:
+    """Converte numeros seriais do Excel e timestamps textuais, preservando a hora.
+
+    Valores como 46336.153356 significam 10/11/2026 03:40 (nao 1970).
+    Tambem aceita campos vazios e celulas datetime.
+    """
     numeric = pd.to_numeric(series, errors="coerce")
-    as_excel = pd.to_datetime(numeric, unit="D", origin="1899-12-30", errors="coerce")
-    as_text = pd.to_datetime(series, errors="coerce", dayfirst=True)
-    plausible = numeric.between(20000, 80000, inclusive="both")
-    return as_text.where(~plausible, as_excel)
+    serial = numeric.between(20000, 80000, inclusive="both")
+    converted = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    if serial.any():
+        converted.loc[serial] = pd.to_datetime(
+            numeric.loc[serial], unit="D", origin="1899-12-30", errors="coerce"
+        )
+    if (~serial).any():
+        converted.loc[~serial] = pd.to_datetime(
+            series.loc[~serial], errors="coerce", dayfirst=True
+        )
+    return converted
 
 
 def read_t0_consolidado(path: str, sheet: str) -> pd.DataFrame:
@@ -174,7 +187,7 @@ def read_t0_consolidado(path: str, sheet: str) -> pd.DataFrame:
 
     c_data = pick_col(df, "Horário de término do prazo de coleta", "Data", "Dia", "Data T0")
     c_codigo = pick_col(df, "Código da base")
-    c_base = pick_col(df, "Nome da base", "Base")
+    c_base = pick_col(df, "Nome da base", "Nome da filial", "Base")
     c_total = pick_col(df, "quantidade a entregar", "Qtd a entregar", "Total")
     c_ok = pick_col(df, "entregue", "Entregue T0", "T0 OK")
     c_taxa = pick_col(df, "T日签收率-签收率", "Taxa T0", "T0")
