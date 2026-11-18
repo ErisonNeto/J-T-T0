@@ -12,6 +12,22 @@ from db import query_rows, test_connection
 BASE_DIR = Path(__file__).resolve().parent
 META_T0 = 0.70
 
+# Gestão central do PostgreSQL: uma linha por código de estação.
+# Preserva os números operacionais do T0 e atualiza somente as dimensões.
+FONTE = """(
+    SELECT t.id, t.data, t.codigo_base,
+           COALESCE(NULLIF(BTRIM(g.nome_base), ''), t.base) AS base,
+           t.regional,
+           COALESCE(NULLIF(BTRIM(g.uf), ''), t.uf) AS uf,
+           COALESCE(NULLIF(BTRIM(g.responsavel_regiao), ''), t.rm) AS rm,
+           COALESCE(NULLIF(BTRIM(g.coordenador), ''),
+                    NULLIF(BTRIM(g.supervisor), ''), t.sc) AS sc,
+           t.total_pedidos, t.t0_ok, t.t0_perdido, t.taxa_t0, t.atualizado_em
+    FROM public.t0_diario t
+    LEFT JOIN jt_operacao.vw_gestao_colaboradores_atual g
+      ON g.estacao_no = BTRIM(t.codigo_base::text)
+) AS t0_com_gestao"""
+
 app = FastAPI(title="T0 - Regional | J&T Express")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -40,7 +56,7 @@ def fetch_rows(data_ini=None, data_fim=None, rm=None, sc=None, uf=None, base=Non
         where.append("base = %s")
         params.append(base)
 
-    sql = "SELECT * FROM t0_diario"
+    sql = "SELECT * FROM " + FONTE
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY data, base;"
@@ -106,7 +122,7 @@ def datas():
 
 @app.get("/api/filtros")
 def filtros():
-    rows = query_rows("SELECT rm, sc, uf, base FROM t0_diario;")
+    rows = query_rows(f"SELECT DISTINCT rm, sc, uf, base FROM {FONTE};")
     return {
         "rm": sorted({r["rm"] for r in rows if r.get("rm")}),
         "sc": sorted({
