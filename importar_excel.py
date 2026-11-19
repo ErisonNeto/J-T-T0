@@ -139,6 +139,18 @@ def read_t0_padrao(path: str, sheet: str) -> pd.DataFrame:
     if missing:
         raise ValueError(f"{Path(path).name}/{sheet}: colunas ausentes: {missing}")
 
+    # Rejeita exportacao JMS com apenas cabecalhos ou linhas formatadas vazias.
+    remessas_preenchidas = df[c_remessa].notna() & df[c_remessa].astype(str).str.strip().ne("")
+    remessas_preenchidas &= ~df[c_remessa].astype(str).str.strip().str.lower().isin(("nan", "none"))
+    if not remessas_preenchidas.any():
+        raise ValueError(
+            f"RELATORIO T0 VAZIO: {Path(path).name}/{sheet} contem apenas "
+            "cabecalhos/linhas vazias, sem numero de remessa. "
+            "No JMS, selecione D-1 nas datas inicial e final, clique Consultar, "
+            "aguarde os resultados e somente entao Exportar; confirme o download completo. "
+            "NENHUM registro foi gravado no PostgreSQL."
+        )
+
     out = pd.DataFrame(
         {
             "numero_remessa": df[c_remessa].fillna("").astype(str).str.strip(),
@@ -156,6 +168,14 @@ def read_t0_padrao(path: str, sheet: str) -> pd.DataFrame:
         & out["numero_remessa"].ne("")
         & out["numero_remessa"].str.lower().ne("nan")
     ].copy()
+
+    if out.empty:
+        raise ValueError(
+            f"RELATORIO T0 SEM REMESSAS VALIDAS: {Path(path).name}/{sheet}. "
+            "Existem celulas preenchidas, mas nenhuma remessa possui simultaneamente "
+            "numero, codigo da base e horario de recebimento valido. "
+            "Confira os filtros e datas da consulta JMS. NENHUM dado foi gravado."
+        )
 
     out["data"] = out["recebimento"].dt.date
     out["t0_ok"] = out["entrega"].notna() & (out["entrega"].dt.date == out["data"])
@@ -457,12 +477,13 @@ def to_api_records(df: pd.DataFrame) -> list[dict]:
 
 
 def upload(df: pd.DataFrame) -> None:
-    if not JT_API_KEY:
-        raise RuntimeError("JT_API_KEY ausente no arquivo .env")
+    if df.empty:
+        raise RuntimeError("IMPORTACAO CANCELADA: zero registros validos; nenhuma gravacao realizada.")
     records = to_api_records(df)
     if not records:
-        print("Nenhuma linha T0 para enviar à JT API.")
-        return
+        raise RuntimeError("IMPORTACAO CANCELADA: zero registros validos; nenhuma gravacao realizada.")
+    if not JT_API_KEY:
+        raise RuntimeError("JT_API_KEY ausente no arquivo .env")
 
     url = f"{JT_API_URL.rstrip('/')}/import"
     headers = {"X-API-Key": JT_API_KEY, "Content-Type": "application/json"}
@@ -506,6 +527,12 @@ def main() -> None:
     args = parser.parse_args()
 
     df, info = build()
+    if df.empty:
+        raise RuntimeError(
+            "IMPORTACAO CANCELADA: nenhum registro da regional Orlean foi gerado. "
+            "Verifique os dados do relatorio e o cruzamento com Gestao de colaboradores. "
+            "Nenhum registro foi enviado ao PostgreSQL."
+        )
 
     print("=" * 72)
     print("IMPORTAÇÃO T0 - J&T")
